@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# @Description:
+# @Description:   用于统计bbox的准确度
 # @Author: CaptainHu
 # @Date: 2020-08-18 15:55:27
 # @LastEditors: CaptainHu
