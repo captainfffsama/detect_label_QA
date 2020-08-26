@@ -29,6 +29,12 @@ def get_sub_dir(folder:str):
     else:
         return []
 
+def get_son_dir(folder:str):
+    if os.path.exists(folder):
+        return [os.path.join(folder,x) for x in os.listdir(folder) if os.path.isdir(os.path.join(folder,x))][0]
+    else:
+        return None,None
+
 def parse_rec(filename):
     """Parse a PASCAL VOC xml file."""
     tree = ET.parse(filename)

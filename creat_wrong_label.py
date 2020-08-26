@@ -3,7 +3,6 @@
 # @Description:   用于将xml故意改错
 # @Author: LiuRui
 # @Date: 2020-08-25 11:17:33
-# @LastEditors: CaptainHu
 
 import os
 import xml.etree.ElementTree as ET
@@ -40,14 +39,14 @@ def whether_creat_wrong(probability):
 
 
 if __name__ == '__main__':
-    DIRECTORY = 'D:/ProjectCode/creat_wrong_label/test-xiugai'  # 待处理数据的目录
+    DIRECTORY = '/home/chiebotgpuhq/Share/gpu-server/data/game/toDianKeYuan/only_about_person/extract_answer/test/2/answer'  # 待处理数据的目录
     specified_number = 30        # 需要处理的图片数目
     delete_bbox_P = 0.5         # 删除label的概率
-    change_bbox_name_P = 0.2    # 修改label名字的概率
+    change_bbox_name_P = 0.5    # 修改label名字的概率
     change_bbox_size_P = 1    # 改变bbox尺寸的概率
     dirlists = find_file(DIRECTORY)
     random.shuffle(dirlists)
-    dirlists_to_process = dirlists[:specified_number]
+    dirlists_to_process = dirlists[:]
     for img_dir in dirlists_to_process:
         xml_dir = os.path.splitext(img_dir)[0] + '.xml'
         tree = ET.parse(xml_dir)

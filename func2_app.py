@@ -6,6 +6,7 @@
 # @LastEditors: CaptainHu
 import os
 from glob import glob
+import sys
 
 import streamlit as st
 import numpy as np
@@ -16,7 +17,6 @@ import SessionState as SS
 
 state = SS.get()
 state.add_attr('func2_app',{'answer_dir':'','pending_dir':'','xml_info_cache':{},'result':{}})
-print('fun2 ap cache id',id(state))
 
 @st.cache
 def show_describtion():
@@ -103,13 +103,8 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
             overlaps = inters / uni
             ovmax = np.max(overlaps)
             jmax = np.argmax(overlaps)
-            try:
-                print(R.keys())
-                if R['name'][jmax] != class_id:
-                    wrong_label.append((xml_id,class_id,bb))
-            except Exception as e:
-                print(R.keys())
-                raise e
+            if R['name'][jmax] != class_id:
+                wrong_label.append((xml_id,class_id,bb))
         else:
             st.error('{} have a zero area gt'.format(xml_id))
             raise ValueError()
@@ -117,7 +112,7 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
         # 框准了
         if ovmax > 0.8:
             if not R['det'][jmax] and (R['name'] == class_id):
-                R['det'][jmax]=1
+                R['det'][jmax]=True
                 if R['difficult'][jmax] != diff:
                     no_diff.append((xml_id,class_id,bb))
             else:
@@ -128,8 +123,17 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
             unaccurate_box.append((xml_id,class_id,bb))
     wl_rate=len(wrong_label)/len(idxs)
     ub_rate=len(unaccurate_box)/len(idxs)
-    state.func2_app['result'][cache_key]=(wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff)
-    return wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff
+    total_ans_bb_num=0
+    no_det_bb_list=[]
+    for ans_xml_id,ans_xml_info in a_recs.items():
+        for idx,bb_result_flag in enumerate(ans_xml_info['det']):
+            total_ans_bb_num +=1
+            if not bb_result_flag:
+                no_det_bb_list.append((ans_xml_id,ans_xml_info['bbox'][idx]))
+
+    state.func2_app['result'][cache_key]=(wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff,no_det_bb_list,len(no_det_bb_list)/total_ans_bb_num)
+    return wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff,no_det_bb_list,len(no_det_bb_list)/total_ans_bb_num
+
 
 def get_common_file(pend_dir,anno_dir):
     pend_files=set([os.path.basename(x) for x in glob(os.path.join(pend_dir,'*.xml'))])
@@ -142,13 +146,21 @@ def get_common_file(pend_dir,anno_dir):
         af_files.append(os.path.join(anno_dir,file))
     return pc_files,af_files
 
-def deal_one_sub_pend_dir(sub_pend_dir,anno_dir):
+def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,placeholder_widget):
     cache_key=sub_pend_dir+anno_dir
     if cache_key in state.func2_app['result'].keys():
         return state.func2_app['result'][cache_key]
-    pc_files,af_files=get_common_file(sub_pend_dir,anno_dir)
+    sub_xml_dir=utils.get_son_dir(sub_pend_dir)
+    pc_files,af_files=get_common_file(sub_xml_dir,anno_dir)
+    if not pc_files:
+        placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(sub_xml_dir))
+        sys.exit()
+    if not af_files:
+        placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(anno_dir))
+        sys.exit()
+
     pend_result,ann_result=get_xml_list_info(pc_files,af_files)
-    result=count_result(anno_dir,sub_pend_dir,ann_result,pend_result)
+    result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result)
     state.func2_app['result'][cache_key]=result
     return result
 
@@ -163,6 +175,8 @@ def show_result(result_dict) -> str:
                        '- 框的不准数量：{} \n  '.format(len(result[3]))+ \
                        '- 可能多框的数量：{}\n  '.format(len(result[4]))+ \
                        '- 缺difficult的数量：{}\n  '.format(len(result[5])))
+                    #    '- 缺框的数量：{} \n  '.format(len(result[6]))+ \
+                    #    '- 缺框的比例：{} \n  '.format(result[7]))
     return result_str
 
 
@@ -180,15 +194,17 @@ def main():
         sub_pend_dirs=utils.get_sub_dir(state.func2_app['pending_dir'])
         print('sub_dir get done!',sub_pend_dirs)
         if not sub_pend_dirs:
-            print('sub_dirs is empty')
-            show_widget.text(' 子目录为空，请组织成正确的目录结构')
+            show_widget.text(' 待查目录子目录为空，请组织成正确的目录结构')
+            st.stop()
         show_widget.text('获取子目录')
         result_dict={}
+
+        ans_xml_dir=utils.get_son_dir(state.func2_app['answer_dir'])
 
         for sub_dir in sub_pend_dirs:
             print('count!!!!')
             show_widget.text('{}结果计算中'.format(sub_dir))
-            result=deal_one_sub_pend_dir(sub_dir,state.func2_app['answer_dir'])
+            result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,placeholder_widget=show_widget)
             result_dict[sub_dir]=result
         result_str=show_result(result_dict)
         show_widget.markdown(result_str)

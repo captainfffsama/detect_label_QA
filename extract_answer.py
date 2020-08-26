@@ -68,6 +68,19 @@ def save_result(save_dir,img_list,img_class_info_dict):
             fw.writelines([x+'\n' for x in txt_content])
 
 def main(answer_dataset_dir,txt_name_list,save_dir,extract_num):
+    r'''
+        Args:
+            answer_dataset_dir: str
+                答案样本所在的目录，读取方式用的glob，所以不支持递归
+            txt_name_list: list
+                元素是txt的文件名，该txt中记录了被分类成本类样本的xml的文件名，所在路径应该是在
+                `answer_dataset_dir`的上一层
+            save_dir: str
+                提取出来之后的答案样本的保存文件夹，需要事先创建好，提取出的答案放在该文件夹下的answer文件夹中
+            extract_num: int
+                提取多少张样本出来，数目要小于answer_dataset中样本数量(不小于也没必要提取了啊)。
+
+    '''
     all_ans_jpg_list=glob.glob(os.path.join(answer_dataset_dir,'*.jpg'))
     txt_info_dict=get_txt_info(answer_dataset_dir,txt_name_list)
 
@@ -79,8 +92,8 @@ def main(answer_dataset_dir,txt_name_list,save_dir,extract_num):
     print('save done')
 
 if __name__ =='__main__':
-    answer_dataset_dir='/home/chiebotgpuhq/Share/gpu-server/data/game/toDianKeYuan/only_about_person/answer'
+    answer_dataset_dir='/home/chiebotgpuhq/Share/gpu-server/data/game/toDianKeYuan/only_about_person/have_check/answer'
     txt_name_list=['2.txt','3.txt']
-    extract_num=200
-    save_dir='/home/chiebotgpuhq/Share/gpu-server/data/game/toDianKeYuan/only_about_person/extract_answer'
+    extract_num=50
+    save_dir='/home/chiebotgpuhq/Share/gpu-server/data/game/toDianKeYuan/only_about_person/extract_answer/2'
     main(answer_dataset_dir,txt_name_list,save_dir,extract_num)
