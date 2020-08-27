@@ -13,13 +13,14 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 import utils
-import SessionState as SS
+# import SessionState as SS
+from SessionState import state
 
 current_mod_name=sys.modules[__name__].__name__
 
 print('I do again')
 
-state = SS.get()
+# state = SS.get()
 state.add_attr('func1_app',{'answer_txt_dir':'','pending_txt_dir':''})
 print('func1',id(state))
 

@@ -13,10 +13,15 @@ import numpy as np
 
 
 import utils
-import SessionState as SS
+# import SessionState as SS
 
-state = SS.get()
-state.add_attr('func2_app',{'answer_dir':'','pending_dir':'','xml_info_cache':{},'result':{}})
+# state = SS.get()
+
+from SessionState import state
+
+state.add_attr('func2_app',{'answer_dir':'', \
+                            'pending_dir':'',\
+                            'xml_info_cache':{},'result':{}})
 
 @st.cache
 def show_describtion():
@@ -81,8 +86,10 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
     wrong_label=[] #框错了标签的
     unaccurate_box=[] #框的位置不准的
     surplus_box=[]#  多框的框
+    ans_no_box=[] # 答案没有的框
     no_diff=[]
     for xml_id,class_id,diff,bb,idx in zip(*pend_xmls_info,idxs):
+        pend_xml_path=os.path.join(pend_dir,xml_id)
         R=a_recs[xml_id]
         BBGT=R['bbox']
         ovmax = -np.inf
@@ -104,23 +111,26 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
             ovmax = np.max(overlaps)
             jmax = np.argmax(overlaps)
             if R['name'][jmax] != class_id:
-                wrong_label.append((xml_id,class_id,bb))
+                wrong_label.append((pend_xml_path,class_id,bb))
         else:
             st.error('{} have a zero area gt'.format(xml_id))
             raise ValueError()
 
         # 框准了
-        if ovmax > 0.8:
+        if ovmax > 0.5:
             if not R['det'][jmax] and (R['name'] == class_id):
                 R['det'][jmax]=True
                 if R['difficult'][jmax] != diff:
-                    no_diff.append((xml_id,class_id,bb))
+                    no_diff.append((pend_xml_path,class_id,bb))
             else:
                 if R['name'] == class_id:
-                    surplus_box.append((xml_id,class_id,bb))
+                    surplus_box.append((pend_xml_path,class_id,bb))
 
+        elif 0.5 >ovmax>0:
+            unaccurate_box.append((pend_xml_path,class_id,bb))
         else:
-            unaccurate_box.append((xml_id,class_id,bb))
+            ans_no_box.append((pend_xml_path,class_id,bb))
+
     wl_rate=len(wrong_label)/len(idxs)
     ub_rate=len(unaccurate_box)/len(idxs)
     total_ans_bb_num=0
@@ -151,6 +161,7 @@ def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,placeholder_widget):
     if cache_key in state.func2_app['result'].keys():
         return state.func2_app['result'][cache_key]
     sub_xml_dir=utils.get_son_dir(sub_pend_dir)
+    placeholder_widget.text('{}  结果计算中'.format(sub_xml_dir))
     pc_files,af_files=get_common_file(sub_xml_dir,anno_dir)
     if not pc_files:
         placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(sub_xml_dir))
@@ -158,7 +169,6 @@ def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,placeholder_widget):
     if not af_files:
         placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(anno_dir))
         sys.exit()
-
     pend_result,ann_result=get_xml_list_info(pc_files,af_files)
     result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result)
     state.func2_app['result'][cache_key]=result
@@ -179,6 +189,17 @@ def show_result(result_dict) -> str:
                     #    '- 缺框的比例：{} \n  '.format(result[7]))
     return result_str
 
+def export_result(result_dict, save_dir):
+    for check_person_dir_path,result in result_dict.items():
+        person_name=check_person_dir_path.split(os.path.sep)[-1]
+        p_save_dir=os.path.join(save_dir,person_name)
+        if not os.path.exists(p_save_dir):
+            os.mkdir(p_save_dir)
+        _,wrong_label,_,unaccurate_box,_,_,_,_=result
+        with open(os.path.join(p_save_dir,'wrong_label.txt'),'w') as fw:
+            fw.writelines([x[0].replace('.xml','.jpg')+'\n' for x in wrong_label])
+        with open(os.path.join(p_save_dir,'unaccurate_box'),'w') as fw:
+            fw.writelines([x[0].replace('.xml','.jpg')+'\n' for x in unaccurate_box])
 
 def main():
     if st.checkbox("显示说明",value=True):
@@ -187,7 +208,7 @@ def main():
     state.func2_app['pending_dir'] =st.text_input("输入待查答案样本的目录",state.func2_app['pending_dir'])
     show_widget = st.empty()
     if not (os.path.exists(state.func2_app['answer_dir']) and os.path.exists(state.func2_app['pending_dir'])):
-        show_widget.warning('xml dir is not exist')
+        show_widget.warning('xml 目录不存在')
     else:
         show_widget.text('计算结果中！')
         print('current count dir is {}'.format(state.func2_app['pending_dir']))
@@ -208,6 +229,11 @@ def main():
             result_dict[sub_dir]=result
         result_str=show_result(result_dict)
         show_widget.markdown(result_str)
+        if st.checkbox('是否导出结果',value=True):
+            save_dir=st.text_input(' 结果保存的目录')
+            if os.path.exists(save_dir):
+                export_result(result_dict,save_dir)
+                st.write('导出完毕')
 
 
 

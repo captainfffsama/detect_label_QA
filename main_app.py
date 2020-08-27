@@ -7,7 +7,8 @@
 
 
 import streamlit as st
-import SessionState as SS
+# import SessionState as SS
+from SessionState import state
 
 import func1_app as f1
 import func2_app as f2
@@ -31,7 +32,7 @@ st.sidebar.title("样本复核工具")
 program=st.sidebar.selectbox("请选择要使用的功能",(WidgetsEnum.APP_FUNC1_FLAG,WidgetsEnum.APP_FUNC2_FLAG))
 
 if st.sidebar.button('清理缓存'):
-    state=SS.get()
+    # state=SS.get()
     print('main',id(state))
     state.re_init()
     st.sidebar.markdown('已尝试清理缓存')
