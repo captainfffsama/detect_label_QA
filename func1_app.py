@@ -13,16 +13,11 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 import utils
-# import SessionState as SS
 from SessionState import state
 
 current_mod_name=sys.modules[__name__].__name__
 
-print('I do again')
-
-# state = SS.get()
-state.add_attr('func1_app',{'answer_txt_dir':'','pending_txt_dir':''})
-print('func1',id(state))
+state.add_attr(current_mod_name,{'answer_txt_dir':'','pending_txt_dir':''})
 
 @st.cache(allow_output_mutation=True)
 def _presistent_list():
@@ -96,6 +91,7 @@ def draw_bar(bar_num,bar_bin_name,bin_class:tuple,color:tuple):
     plt.legend()
 
 def main():
+    state.re_init(current_mod_name)
     if st.checkbox("显示说明",value=True):
         st.markdown(show_describtion())
     state.func1_app['answer_txt_dir']= st.text_input("输入标准答案txt的目录",value=state.func1_app['answer_txt_dir'])

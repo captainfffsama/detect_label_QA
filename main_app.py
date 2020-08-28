@@ -4,6 +4,7 @@
 # @Author: CaptainHu
 # @Date: 2020-08-18 15:30:39
 # @LastEditors: CaptainHu
+import sys
 
 
 import streamlit as st
@@ -30,7 +31,6 @@ def init_app_dict():
 st.title("样本复核工具")
 st.sidebar.title("样本复核工具")
 program=st.sidebar.selectbox("请选择要使用的功能",(WidgetsEnum.APP_FUNC1_FLAG,WidgetsEnum.APP_FUNC2_FLAG))
-
 if st.sidebar.button('清理缓存'):
     # state=SS.get()
     print('main',id(state))

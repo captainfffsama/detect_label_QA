@@ -4,24 +4,28 @@
 # @Author: CaptainHu
 # @Date: 2020-08-18 15:55:27
 # @LastEditors: CaptainHu
+from logging import PlaceHolder
 import os
 from glob import glob
 import sys
+from collections import defaultdict
+from enum import Enum
 
 import streamlit as st
 import numpy as np
 
-
 import utils
-# import SessionState as SS
-
-# state = SS.get()
-
 from SessionState import state
 
-state.add_attr('func2_app',{'answer_dir':'', \
+current_mod_name=sys.modules[__name__].__name__
+
+state.add_attr(current_mod_name,{'answer_dir':'', \
                             'pending_dir':'',\
-                            'xml_info_cache':{},'result':{}})
+                            'result':{}})
+
+class SHOW_FLAG(Enum):
+    ANNO='显示答案'
+    PEND='显示待查'
 
 @st.cache
 def show_describtion():
@@ -32,7 +36,6 @@ def show_describtion():
         \n
         '''
         return readme_text
-
 
 def get_xml_list_info(pc_file,anno_file) -> tuple:
     result_dict_pc={}
@@ -76,11 +79,8 @@ def get_anno_info(result_dict):
         }
     return recs,npos
 
-def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
-    cache_key=anno_dir+pend_dir
-    if cache_key in state.func2_app['result'].keys():
-        return state.func2_app['result'][cache_key]
-
+@utils.cache(app_mod_name=current_mod_name,cache_dict_key='result')
+def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tuple,iou_thr:float):
     a_recs,a_npos=ans_xmls_info
     idxs=range(len(pend_xmls_info[0]))
     wrong_label=[] #框错了标签的
@@ -90,6 +90,7 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
     no_diff=[]
     for xml_id,class_id,diff,bb,idx in zip(*pend_xmls_info,idxs):
         pend_xml_path=os.path.join(pend_dir,xml_id)
+        anno_xml_path=os.path.join(anno_dir,xml_id)
         R=a_recs[xml_id]
         BBGT=R['bbox']
         ovmax = -np.inf
@@ -110,24 +111,26 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
             overlaps = inters / uni
             ovmax = np.max(overlaps)
             jmax = np.argmax(overlaps)
-            if R['name'][jmax] != class_id:
-                wrong_label.append((pend_xml_path,class_id,bb))
         else:
             st.error('{} have a zero area gt'.format(xml_id))
             raise ValueError()
 
         # 框准了
-        if ovmax > 0.5:
-            if not R['det'][jmax] and (R['name'] == class_id):
-                R['det'][jmax]=True
-                if R['difficult'][jmax] != diff:
-                    no_diff.append((pend_xml_path,class_id,bb))
+        if ovmax >= iou_thr:
+            if not R['det'][jmax]:
+                if R['name'][jmax] == class_id:
+                    R['det'][jmax]=True
+                    if R['difficult'][jmax] != diff:
+                        no_diff.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
+                else:
+                    wrong_label.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
             else:
-                if R['name'] == class_id:
-                    surplus_box.append((pend_xml_path,class_id,bb))
-
-        elif 0.5 >ovmax>0:
-            unaccurate_box.append((pend_xml_path,class_id,bb))
+                if R['name'][jmax]==class_id:
+                    surplus_box.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
+                else:
+                    wrong_label.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
+        elif iou_thr >ovmax>0:
+            unaccurate_box.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
         else:
             ans_no_box.append((pend_xml_path,class_id,bb))
 
@@ -141,11 +144,11 @@ def count_result(anno_dir,pend_dir,ans_xmls_info,pend_xmls_info):
             if not bb_result_flag:
                 no_det_bb_list.append((ans_xml_id,ans_xml_info['bbox'][idx]))
 
-    state.func2_app['result'][cache_key]=(wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff,no_det_bb_list,len(no_det_bb_list)/total_ans_bb_num)
     return wl_rate,wrong_label,ub_rate,unaccurate_box,surplus_box,no_diff,no_det_bb_list,len(no_det_bb_list)/total_ans_bb_num
 
-
 def get_common_file(pend_dir,anno_dir):
+    r'''获取答案目录和待测目录里相同名字的样本,即从待测样本里把参进去的答案找出来
+    '''
     pend_files=set([os.path.basename(x) for x in glob(os.path.join(pend_dir,'*.xml'))])
     anno_files=set([os.path.basename(x) for x in glob(os.path.join(anno_dir,'*.xml'))])
     comm_file=pend_files&anno_files
@@ -156,10 +159,7 @@ def get_common_file(pend_dir,anno_dir):
         af_files.append(os.path.join(anno_dir,file))
     return pc_files,af_files
 
-def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,placeholder_widget):
-    cache_key=sub_pend_dir+anno_dir
-    if cache_key in state.func2_app['result'].keys():
-        return state.func2_app['result'][cache_key]
+def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,iou_thr:float,placeholder_widget):
     sub_xml_dir=utils.get_son_dir(sub_pend_dir)
     placeholder_widget.text('{}  结果计算中'.format(sub_xml_dir))
     pc_files,af_files=get_common_file(sub_xml_dir,anno_dir)
@@ -170,8 +170,7 @@ def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,placeholder_widget):
         placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(anno_dir))
         sys.exit()
     pend_result,ann_result=get_xml_list_info(pc_files,af_files)
-    result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result)
-    state.func2_app['result'][cache_key]=result
+    result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result,iou_thr)
     return result
 
 def show_result(result_dict) -> str:
@@ -197,38 +196,86 @@ def export_result(result_dict, save_dir):
             os.mkdir(p_save_dir)
         _,wrong_label,_,unaccurate_box,_,_,_,_=result
         with open(os.path.join(p_save_dir,'wrong_label.txt'),'w') as fw:
-            fw.writelines([x[0].replace('.xml','.jpg')+'\n' for x in wrong_label])
+            fw.writelines([x[0][0].replace('.xml','.jpg')+'\n' for x in wrong_label])
         with open(os.path.join(p_save_dir,'unaccurate_box'),'w') as fw:
-            fw.writelines([x[0].replace('.xml','.jpg')+'\n' for x in unaccurate_box])
+            fw.writelines([x[0][0].replace('.xml','.jpg')+'\n' for x in unaccurate_box])
+
+@utils.cache(app_mod_name=current_mod_name,cache_dict_key='show_result')
+def deal_show_result(result:list) -> dict:
+    r'''result是类似`count_result`结果中wrong_label的结果,转换成dict
+        key是pend的图片的path,value是一个list,第一位是pend的obj list,
+        第二位是anno的obj_list
+    '''
+    result_dict=defaultdict(lambda:([],[]))
+    for pair_obj in result:
+        pend_obj,anno_obj=pair_obj
+        jpg_path=pend_obj[0].replace('.xml','.jpg')
+        result_dict[jpg_path][0].append((pend_obj[1],*pend_obj[2].tolist()))
+        result_dict[jpg_path][1].append((anno_obj[1],*anno_obj[2].tolist()))
+
+    return result_dict
+
+def show_pair_result(result_dict):
+    img_list=tuple(result_dict.keys())
+    current_img_idx=st.slider(label='',min_value=0,max_value=len(img_list)-1,value=0,step=1,key=repr(id(result_dict)))
+    current_img_path=img_list[current_img_idx]
+    current_show_flag=st.multiselect(label='',options=[SHOW_FLAG.ANNO.value,SHOW_FLAG.PEND.value],key=repr(id(result_dict)))
+    pend_obj,anno_obj=result_dict[current_img_path]
+    if SHOW_FLAG.ANNO.value not in current_show_flag:
+        anno_obj=None
+    if SHOW_FLAG.PEND.value not in current_show_flag:
+        pend_obj=None
+    place_holder=st.empty()
+    place_holder.info('正在拼命努力疯狂竭尽全力的绘制图片img......')
+    fig=utils.draw_detec_pair_obj(current_img_path,ann_obj=anno_obj,pend_obj=pend_obj)
+    place_holder.pyplot(fig)
+    st.write('当前显示的图片:{}'.format(current_img_path),key=current_img_path)
 
 def main():
+    state.re_init(current_mod_name)
     if st.checkbox("显示说明",value=True):
         st.markdown(show_describtion())
     state.func2_app['answer_dir'] = st.text_input("输入标准答案样本的目录",state.func2_app['answer_dir'])
     state.func2_app['pending_dir'] =st.text_input("输入待查答案样本的目录",state.func2_app['pending_dir'])
-    show_widget = st.empty()
+    show_widget_1 = st.empty()
     if not (os.path.exists(state.func2_app['answer_dir']) and os.path.exists(state.func2_app['pending_dir'])):
-        show_widget.warning('xml 目录不存在')
+        show_widget_1.warning('xml 目录不存在')
     else:
-        show_widget.text('计算结果中！')
+        iou_thr=show_widget_1.slider('请选择IOU阈值:',min_value=0.0,max_value=1.0,value=0.5,step=0.1)
+
+        show_widget_2=st.text('计算结果中！')
         print('current count dir is {}'.format(state.func2_app['pending_dir']))
         sub_pend_dirs=utils.get_sub_dir(state.func2_app['pending_dir'])
         print('sub_dir get done!',sub_pend_dirs)
         if not sub_pend_dirs:
-            show_widget.text(' 待查目录子目录为空，请组织成正确的目录结构')
+            show_widget_2.text(' 待查目录子目录为空，请组织成正确的目录结构')
             st.stop()
-        show_widget.text('获取子目录')
+        show_widget_2.text('获取子目录')
         result_dict={}
 
         ans_xml_dir=utils.get_son_dir(state.func2_app['answer_dir'])
 
         for sub_dir in sub_pend_dirs:
             print('count!!!!')
-            show_widget.text('{}结果计算中'.format(sub_dir))
-            result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,placeholder_widget=show_widget)
+            show_widget_2.text('{}结果计算中'.format(sub_dir))
+            result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,iou_thr,placeholder_widget=show_widget_2)
             result_dict[sub_dir]=result
         result_str=show_result(result_dict)
-        show_widget.markdown(result_str)
+        show_widget_2.markdown(result_str)
+        # 显示图片
+        if st.checkbox(' 是否绘制图片有问题的结果',value=False):
+            persons={x.split(os.path.sep)[-1]:x for x in result_dict.keys()}
+            current_preson=st.radio("当前显示结果的文件夹",tuple(persons.keys()))
+            current_preson=persons[current_preson]
+            _,wrong_labe_result,_,unaccurate_result,_,_,_,_=result_dict[current_preson]
+            wl_show_dict=deal_show_result(wrong_labe_result)
+            ua_show_dict=deal_show_result(unaccurate_result)
+            st.header('显示错误标签的图片')
+            show_pair_result(wl_show_dict)
+            st.header('显示没框准的图片')
+            show_pair_result(ua_show_dict)
+
+
         if st.checkbox('是否导出结果',value=True):
             save_dir=st.text_input(' 结果保存的目录')
             if os.path.exists(save_dir):

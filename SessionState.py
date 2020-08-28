@@ -66,7 +66,8 @@ class SessionState(object):
 
     def re_init(self,retain_attr=None):
         for key,v in self.SS_saver.items():
-            setattr(self,key,deepcopy(v))
+            if retain_attr !=key:
+                setattr(self,key,deepcopy(v))
 
 
 
