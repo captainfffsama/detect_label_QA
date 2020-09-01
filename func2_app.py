@@ -10,6 +10,7 @@ from glob import glob
 import sys
 from collections import defaultdict
 from enum import Enum
+import time
 
 import streamlit as st
 import numpy as np
@@ -80,7 +81,7 @@ def get_anno_info(result_dict):
     return recs,npos
 
 @utils.cache(app_mod_name=current_mod_name,cache_dict_key='result')
-def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tuple,iou_thr:float):
+def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tuple,iou_thr:float,small_thr:tuple =None,ignore_small:bool=False):
     a_recs,a_npos=ans_xmls_info
     idxs=range(len(pend_xmls_info[0]))
     wrong_label=[] #框错了标签的
@@ -89,11 +90,18 @@ def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tu
     ans_no_box=[] # 答案没有的框
     no_diff=[]
     for xml_id,class_id,diff,bb,idx in zip(*pend_xmls_info,idxs):
+        current_iou_thr=iou_thr
         pend_xml_path=os.path.join(pend_dir,xml_id)
         anno_xml_path=os.path.join(anno_dir,xml_id)
         R=a_recs[xml_id]
         BBGT=R['bbox']
         ovmax = -np.inf
+        if small_thr:
+            if (bb[2]-bb[0])*(bb[3]-bb[1]) < small_thr[0]*small_thr[1]:
+                if ignore_small:
+                    continue
+                else:
+                    current_iou_thr=max(0.2,iou_thr-0.3)
         if BBGT.size > 0:
             ixmin = np.maximum(BBGT[:, 0], bb[0])
             iymin = np.maximum(BBGT[:, 1], bb[1])
@@ -116,7 +124,7 @@ def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tu
             raise ValueError()
 
         # 框准了
-        if ovmax >= iou_thr:
+        if ovmax >= current_iou_thr:
             if not R['det'][jmax]:
                 if R['name'][jmax] == class_id:
                     R['det'][jmax]=True
@@ -129,7 +137,7 @@ def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tu
                     surplus_box.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
                 else:
                     wrong_label.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
-        elif iou_thr >ovmax>0:
+        elif current_iou_thr>ovmax>0:
             unaccurate_box.append(((pend_xml_path,class_id,bb),(anno_xml_path,R['name'][jmax],BBGT[jmax])))
         else:
             ans_no_box.append((pend_xml_path,class_id,bb))
@@ -159,7 +167,7 @@ def get_common_file(pend_dir,anno_dir):
         af_files.append(os.path.join(anno_dir,file))
     return pc_files,af_files
 
-def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,iou_thr:float,placeholder_widget):
+def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,iou_thr:float,small_thr,ignore_small,placeholder_widget):
     sub_xml_dir=utils.get_son_dir(sub_pend_dir)
     placeholder_widget.text('{}  结果计算中'.format(sub_xml_dir))
     pc_files,af_files=get_common_file(sub_xml_dir,anno_dir)
@@ -170,7 +178,7 @@ def deal_one_sub_pend_dir(sub_pend_dir,anno_dir,iou_thr:float,placeholder_widget
         placeholder_widget.markdown("**在{} 下没有找到xml，请检查目录地址**".format(anno_dir))
         sys.exit()
     pend_result,ann_result=get_xml_list_info(pc_files,af_files)
-    result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result,iou_thr)
+    result=count_result(anno_dir,sub_xml_dir,ann_result,pend_result,iou_thr,small_thr,ignore_small)
     return result
 
 def show_result(result_dict) -> str:
@@ -216,10 +224,12 @@ def deal_show_result(result:list) -> dict:
     return result_dict
 
 def show_pair_result(result_dict):
+    if not result_dict:
+        return None
     img_list=tuple(result_dict.keys())
-    current_img_idx=st.slider(label='',min_value=0,max_value=len(img_list)-1,value=0,step=1,key=repr(id(result_dict)))
+    current_img_idx=st.slider(label='',min_value=0,max_value=len(img_list)-1,value=0,step=1,key=hash(repr(result_dict)))
     current_img_path=img_list[current_img_idx]
-    current_show_flag=st.multiselect(label='',options=[SHOW_FLAG.ANNO.value,SHOW_FLAG.PEND.value],key=repr(id(result_dict)))
+    current_show_flag=st.multiselect(label='',options=[SHOW_FLAG.ANNO.value,SHOW_FLAG.PEND.value],key=hash(repr(result_dict)))
     pend_obj,anno_obj=result_dict[current_img_path]
     if SHOW_FLAG.ANNO.value not in current_show_flag:
         anno_obj=None
@@ -241,6 +251,19 @@ def main():
     if not (os.path.exists(state.func2_app['answer_dir']) and os.path.exists(state.func2_app['pending_dir'])):
         show_widget_1.warning('xml 目录不存在')
     else:
+        small_thr=None
+        ignore_small=False
+        if st.checkbox('启用宽容小目标模式'):
+            if st.checkbox('启用忽略小目标'):
+                ignore_small=True
+            st.markdown('''
+            宽容小目标模式下,对于尺寸小于预设值的目标,在计算iou指标的时候会降低, \n
+            具体计算方式是在当前阈值下-0.3 和0.2取最大值 \n
+            若启用忽略小目标,那么小于尺寸的目标将不再考虑
+            ''')
+            w_small_thr=st.number_input('最小宽度',min_value=1,max_value=100,value=32,step=1)
+            h_small_thr=st.number_input('最小高度',min_value=1,max_value=100,value=32,step=1)
+            small_thr=(h_small_thr,w_small_thr)
         iou_thr=show_widget_1.slider('请选择IOU阈值:',min_value=0.0,max_value=1.0,value=0.5,step=0.1)
 
         show_widget_2=st.text('计算结果中！')
@@ -258,7 +281,7 @@ def main():
         for sub_dir in sub_pend_dirs:
             print('count!!!!')
             show_widget_2.text('{}结果计算中'.format(sub_dir))
-            result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,iou_thr,placeholder_widget=show_widget_2)
+            result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,iou_thr,small_thr,ignore_small,placeholder_widget=show_widget_2)
             result_dict[sub_dir]=result
         result_str=show_result(result_dict)
         show_widget_2.markdown(result_str)
@@ -272,8 +295,11 @@ def main():
             ua_show_dict=deal_show_result(unaccurate_result)
             st.header('显示错误标签的图片')
             show_pair_result(wl_show_dict)
-            st.header('显示没框准的图片')
-            show_pair_result(ua_show_dict)
+            if repr(wl_show_dict) ==repr(ua_show_dict):
+                st.text('错误标签和没框准的图片一样,这里不再显示没框准的图片')
+            else:
+                st.header('显示没框准的图片')
+                show_pair_result(ua_show_dict)
 
 
         if st.checkbox('是否导出结果',value=True):

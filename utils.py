@@ -97,9 +97,9 @@ def cache(*,app_mod_name:str,cache_dict_key:str,used:int=100):
             if cache_dict_key not in cache_attr.keys():
                 cache_attr[cache_dict_key]={}
 
-            args_str=','.join([repr(x)[:100] for x in args[:used]])
+            args_str=','.join([repr(x) for x in args[:used]])
             kwargs_value=list(kwargs.values())
-            kwargs_str=','.join([repr(x)[:100] for x in kwargs_value[:used]])
+            kwargs_str=','.join([repr(x) for x in kwargs_value[:used]])
             cache_key=hash(func.__name__+args_str+kwargs_str)
             if cache_key not in cache_attr[cache_dict_key]:
                 cache_attr[cache_dict_key][cache_key]=func(*args,**kwargs)
