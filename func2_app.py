@@ -14,6 +14,7 @@ import time
 
 import streamlit as st
 import numpy as np
+import cv2
 
 import utils
 from SessionState import state
@@ -81,7 +82,7 @@ def get_anno_info(result_dict):
     return recs,npos
 
 @utils.cache(app_mod_name=current_mod_name,cache_dict_key='result')
-def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tuple,iou_thr:float,small_thr:tuple =None,ignore_small:bool=False):
+def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tuple,iou_thr:float,small_thr:int =None,ignore_small:bool=False):
     a_recs,a_npos=ans_xmls_info
     idxs=range(len(pend_xmls_info[0]))
     wrong_label=[] #框错了标签的
@@ -93,11 +94,13 @@ def count_result(anno_dir:str,pend_dir:str,ans_xmls_info:tuple,pend_xmls_info:tu
         current_iou_thr=iou_thr
         pend_xml_path=os.path.join(pend_dir,xml_id)
         anno_xml_path=os.path.join(anno_dir,xml_id)
+        img=cv2.imread(anno_xml_path.replace('.xml','.jpg'),cv2.IMREAD_IGNORE_ORIENTATION|cv2.IMREAD_COLOR)
+        img_h,img_w,_=img.shape
         R=a_recs[xml_id]
         BBGT=R['bbox']
         ovmax = -np.inf
         if small_thr:
-            if (bb[2]-bb[0])*(bb[3]-bb[1]) < small_thr[0]*small_thr[1]:
+            if (bb[2]-bb[0])*(bb[3]-bb[1]) < img_h*img_w*0.01*small_thr:
                 if ignore_small:
                     continue
                 else:
@@ -236,7 +239,7 @@ def show_pair_result(result_dict):
     if SHOW_FLAG.PEND.value not in current_show_flag:
         pend_obj=None
     place_holder=st.empty()
-    place_holder.info('正在拼命努力疯狂竭尽全力的绘制图片img......')
+    place_holder.info('正在拼命努力疯狂竭尽全力的绘制图片ing......')
     fig=utils.draw_detec_pair_obj(current_img_path,ann_obj=anno_obj,pend_obj=pend_obj)
     place_holder.pyplot(fig)
     st.write('当前显示的图片:{}'.format(current_img_path),key=current_img_path)
@@ -261,12 +264,11 @@ def main():
             具体计算方式是在当前阈值下-0.3 和0.2取最大值 \n
             若启用忽略小目标,那么小于尺寸的目标将不再考虑
             ''')
-            w_small_thr=st.number_input('最小宽度',min_value=1,max_value=100,value=32,step=1)
-            h_small_thr=st.number_input('最小高度',min_value=1,max_value=100,value=32,step=1)
-            small_thr=(h_small_thr,w_small_thr)
+            small_thr=st.number_input(' 最小面积比例(%)',min_value=1.0,max_value=100.0,value=5.0,step=0.1)
+
         iou_thr=show_widget_1.slider('请选择IOU阈值:',min_value=0.0,max_value=1.0,value=0.5,step=0.1)
 
-        show_widget_2=st.text('计算结果中！')
+        show_widget_2=st.info('计算结果中！')
         print('current count dir is {}'.format(state.func2_app['pending_dir']))
         sub_pend_dirs=utils.get_sub_dir(state.func2_app['pending_dir'])
         print('sub_dir get done!',sub_pend_dirs)
@@ -280,7 +282,7 @@ def main():
 
         for sub_dir in sub_pend_dirs:
             print('count!!!!')
-            show_widget_2.text('{}结果计算中'.format(sub_dir))
+            show_widget_2.info('{}结果计算中'.format(sub_dir))
             result=deal_one_sub_pend_dir(sub_dir,ans_xml_dir,iou_thr,small_thr,ignore_small,placeholder_widget=show_widget_2)
             result_dict[sub_dir]=result
         result_str=show_result(result_dict)
